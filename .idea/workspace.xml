@@ -18,8 +18,7 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="d232ef73-70f3-45fc-b398-4dc459798adc" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/files.h" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/package_avl.h" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -80,7 +79,7 @@
       <updated>1782411688617</updated>
       <workItem from="1782411688617" duration="8000" />
       <workItem from="1782422609365" duration="819000" />
-      <workItem from="1782423608925" duration="510000" />
+      <workItem from="1782423608925" duration="771000" />
     </task>
     <servers />
   </component>

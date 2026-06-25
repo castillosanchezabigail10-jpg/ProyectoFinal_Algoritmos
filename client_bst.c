@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "client_bst.h"
- //probando github
+ //
 /* Crear nodo */
 /* entrada:  Client c — datos del cliente a almacenar
    salida: puntero al nuevo nodo, o NULL si falla malloc */

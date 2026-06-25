@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "package_list.h"
 
 // Definición de la estructura para los datos del Paquete
 typedef struct {

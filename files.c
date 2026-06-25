@@ -5,7 +5,7 @@
 #include "files.h"
 
 #define CLIENTS_FILE "clients.txt"
-
+//Probando
 /*  Formato del archivo clients.txt
    Una línea por cliente, campos separados por '|':
    id|nombre|telefono|correo|direccion

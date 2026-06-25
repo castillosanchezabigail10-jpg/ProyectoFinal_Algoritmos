@@ -119,3 +119,91 @@ void graph_show_matrix(const Graph *g) {
     }
     printf("\n");
 }
+
+#include <limits.h>
+
+#define INF INT_MAX
+
+/* FUNCIÓN AUXILIAR INTERNA — Encuentra el vértice con la distancia mínima 
+   que aún no ha sido procesado (visitado). */
+static int dijkstra_min_distance(const int dist[], const int visited[], int count) {
+    int min = INF, min_index = -1;
+
+    for (int v = 0; v < count; v++) {
+        if (visited[v] == 0 && dist[v] <= min) {
+            min = dist[v];
+            min_index = v;
+        }
+    }
+    return min_index;
+}
+
+/* FUNCIÓN AUXILIAR INTERNA*/
+static void dijkstra_print_path(const int parent[], int j, const Graph *g) {
+    if (parent[j] == -1) {
+        printf("%s", g->points[j]);
+        return;
+    }
+
+    dijkstra_print_path(parent, parent[j], g);
+    printf(" -> %s", g->points[j]);
+}
+
+/* CALCULAR RUTA MÁS CORTA (DIJKSTRA)*/
+void graph_shortest_path(const Graph *g, const char *from, const char *to) {
+    int count = g->count;
+    int src = -1, dest = -1;
+
+    for (int i = 0; i < count; i++) {
+        if (strcmp(g->points[i], from) == 0) src = i;
+        if (strcmp(g->points[i], to) == 0) dest = i;
+    }
+
+    if (src == -1) {
+        printf("Error: El punto de origen '%s' no existe.\n", from);
+        return;
+    }
+    if (dest == -1) {
+        printf("Error: El punto de destino '%s' no existe.\n", to);
+        return;
+    }
+
+    int dist[MAX_POINTS];     
+    int visited[MAX_POINTS]; 
+    int parent[MAX_POINTS];   
+
+    for (int i = 0; i < count; i++) {
+        dist[i] = INF;
+        visited[i] = 0;
+        parent[i] = -1;
+    }
+
+    dist[src] = 0;
+
+    for (int i = 0; i < count - 1; i++) {
+        int u = dijkstra_min_distance(dist, visited, count);
+
+        if (u == -1 || dist[u] == INF) break;
+
+        visited[u] = 1;
+
+        for (int v = 0; v < count; v++) {
+
+            if (!visited[v] && g->matrix[u][v] > 0 && dist[u] != INF 
+                && dist[u] + g->matrix[u][v] < dist[v]) {
+                
+                parent[v] = u;
+                dist[v] = dist[u] + g->matrix[u][v];
+            }
+        }
+    }
+
+    if (dist[dest] == INF) {
+        printf("No existe una ruta disponible entre '%s' y '%s'.\n", from, to);
+    } else {
+        printf("\nRuta mas corta: ");
+        dijkstra_print_path(parent, dest, g);
+        printf("\n");
+        printf("Distancia total: %d km\n\n", dist[dest]);
+    }
+}

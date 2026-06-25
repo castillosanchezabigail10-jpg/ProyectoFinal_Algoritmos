@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "returns_stack.h"
 
 typedef struct {
     char codigo[20];

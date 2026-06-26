@@ -1,0 +1,1263 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+/* ── Módulos del proyecto ───────────────────────────────────────── */
+#include "client_bst.h"
+#include "package_avl.h"
+#include "routes_graph.h"
+#include "files.h"
+#include "package_list.h"
+#include "delivery_queue.h"
+#include "returns_stack.h"
+
+/* ── Estado global ──────────────────────────────────────────────── */
+BSTNode    *client_tree  = NULL;
+AVLNode    *package_tree = NULL;
+Graph       route_graph;
+NodoPaquete *lista_paquetes = NULL;
+Cola        cola_entregas;
+Pila        pila_devoluciones;
+
+/* REGISTRAR PAQUETE  */
+void register_package() {
+    Paquete p;
+
+    printf("\n--- Registrar nuevo paquete ---\n");
+    printf("Codigo del paquete: ");
+    scanf(" %[^\n]", p.codigo);
+
+    printf("ID del cliente: ");
+    scanf("%d", &p.idCliente);
+
+    /* VALIDACIÓN: el cliente debe existir en el BST */
+    BSTNode *found = bst_search(client_tree, p.idCliente);
+    if (found == NULL) {
+        printf("Error: no existe un cliente con ID %d. Paquete rechazado.\n", p.idCliente);
+        return;
+    }
+
+    printf("Destinatario: ");
+    scanf(" %[^\n]", p.destinatario);
+
+    printf("Destino: ");
+    scanf(" %[^\n]", p.destino);
+
+    printf("Peso (kg): ");
+    scanf("%f", &p.peso);
+
+    printf("Prioridad (1=alta, 2=media, 3=baja): ");
+    scanf("%d", &p.prioridad);
+
+    strcpy(p.estado, "pendiente");
+
+    /* Agregar a lista enlazada y encolar */
+    lista_paquetes = registrarPaquete(lista_paquetes, p);
+    encolarPaquete(&cola_entregas, p);
+
+    printf("Paquete registrado y encolado para el cliente %s.\n", found->data.name);
+}
+
+/*  MENÚ PRINCIPAL */
+int main() {
+    /* Inicializar estructuras */
+    graph_init(&route_graph);
+    inicializarCola(&cola_entregas);
+    inicializarPila(&pila_devoluciones);
+
+    /* Cargar datos desde archivos */
+    client_tree = load_clients(client_tree);
+
+    int option = -1;
+
+    while (option != 0) {
+        printf("\n========== RoutePack ==========\n");
+        printf("1. Gestion de clientes (BST)\n");
+        printf("2. Gestion de paquetes (Lista + AVL)\n");
+        printf("3. Cola de entregas\n");
+        printf("4. Pila de devoluciones\n");
+        printf("5. Rutas y navegacion\n");
+        printf("6. Reportes\n");
+        printf("0. Salir\n");
+        printf("Opcion: ");
+        scanf("%d", &option);
+
+        switch (option) {
+
+            /* ── Clientes (BST) ─ */
+            case 1: {
+                int sub = -1;
+                printf("\n1. Registrar cliente\n2. Buscar cliente\n3. Listar clientes (inorden)\nOpcion: ");
+                scanf("%d", &sub);
+                if (sub == 1) {
+                    Client c;
+                    printf("ID: ");        scanf("%d",  &c.id);
+                    printf("Nombre: ");    scanf(" %[^\n]", c.name);
+                    printf("Telefono: ");  scanf(" %[^\n]", c.phone);
+                    printf("Correo: ");    scanf(" %[^\n]", c.email);
+                    printf("Direccion: "); scanf(" %[^\n]", c.address);
+                    client_tree = bst_insert(client_tree, c);
+                } else if (sub == 2) {
+                    int id;
+                    printf("ID a buscar: "); scanf("%d", &id);
+                    BSTNode *r = bst_search(client_tree, id);
+                    if (r) printf("Encontrado: %s | %s | %s\n", r->data.name, r->data.phone, r->data.email);
+                    else   printf("Cliente no encontrado.\n");
+                } else if (sub == 3) {
+                    bst_inorder(client_tree);
+                }
+                break;
+            }
+
+            /* ── Paquetes (Lista enlazada + AVL) ──────────────── */
+            case 2: {
+                int sub = -1;
+                printf("\n1. Registrar paquete\n2. Buscar paquete\n3. Listar paquetes\n4. Modificar estado\n5. Eliminar paquete\nOpcion: ");
+                scanf("%d", &sub);
+                if (sub == 1) {
+                    register_package();
+                } else if (sub == 2) {
+                    char codigo[20];
+                    printf("Codigo a buscar: "); scanf(" %[^\n]", codigo);
+                    NodoPaquete *r = buscarPaquete(lista_paquetes, codigo);
+                    if (r) printf("Encontrado: %s | %s | Estado: %s\n", r->datos.codigo, r->datos.destino, r->datos.estado);
+                    else   printf("Paquete no encontrado.\n");
+                } else if (sub == 3) {
+                    mostrarPaquetes(lista_paquetes);
+                } else if (sub == 4) {
+                    char codigo[20], estado[30];
+                    printf("Codigo: ");      scanf(" %[^\n]", codigo);
+                    printf("Nuevo estado: "); scanf(" %[^\n]", estado);
+                    modificarEstadoPaquete(lista_paquetes, codigo, estado);
+                } else if (sub == 5) {
+                    char codigo[20];
+                    printf("Codigo a eliminar: "); scanf(" %[^\n]", codigo);
+                    lista_paquetes = eliminarPaquete(lista_paquetes, codigo);
+                }
+                break;
+            }
+
+            /* ── Cola de entregas (FIFO) ──────────────────────── */
+            case 3: {
+                int sub = -1;
+                printf("\n1. Ver cola de entregas\n2. Consultar siguiente\n3. Procesar entrega\nOpcion: ");
+                scanf("%d", &sub);
+                if (sub == 1) {
+                    mostrarCola(cola_entregas);
+                } else if (sub == 2) {
+                    consultarSiguienteCola(cola_entregas);
+                } else if (sub == 3) {
+                    /* Desencolar y marcar como entregado o devuelto */
+                    if (cola_entregas.frente == NULL) {
+                        printf("No hay paquetes en la cola.\n");
+                    } else {
+                        Paquete procesado = desencolarPaquete(&cola_entregas);
+                        int resultado;
+                        printf("Entrega exitosa? (1=Si / 0=No): ");
+                        scanf("%d", &resultado);
+                        if (resultado) {
+                            modificarEstadoPaquete(lista_paquetes, procesado.codigo, "entregado");
+                            printf("Paquete %s marcado como entregado.\n", procesado.codigo);
+                        } else {
+                            strcpy(procesado.estado, "devuelto");
+                            modificarEstadoPaquete(lista_paquetes, procesado.codigo, "devuelto");
+                            apilarPaquete(&pila_devoluciones, procesado);
+                            printf("Paquete %s enviado a pila de devoluciones.\n", procesado.codigo);
+                        }
+                    }
+                }
+                break;
+            }
+
+            /* ── Pila de devoluciones (LIFO) ──────────────────── */
+            case 4: {
+                int sub = -1;
+                printf("\n1. Ver pila de devoluciones\n2. Consultar ultimo devuelto\n3. Reencolar devolucion\nOpcion: ");
+                scanf("%d", &sub);
+                if (sub == 1) {
+                    mostrarPila(pila_devoluciones);
+                } else if (sub == 2) {
+                    consultarUltimoDevuelto(pila_devoluciones);
+                } else if (sub == 3) {
+                    /* Desapilar y reencolar */
+                    if (pila_devoluciones.tope == NULL) {
+                        printf("No hay paquetes devueltos.\n");
+                    } else {
+                        Paquete reencolar = desapilarPaquete(&pila_devoluciones);
+                        strcpy(reencolar.estado, "pendiente");
+                        modificarEstadoPaquete(lista_paquetes, reencolar.codigo, "pendiente");
+                        encolarPaquete(&cola_entregas, reencolar);
+                        printf("Paquete %s reencolado.\n", reencolar.codigo);
+                    }
+                }
+                break;
+            }
+
+            /* ── Rutas y navegación ───────────────────────────── */
+            case 5: {
+                int sub = -1;
+                printf("\n1. Agregar punto\n2. Agregar ruta\n3. Ver puntos\n4. Ver matriz\nOpcion: ");
+                scanf("%d", &sub);
+                if (sub == 1) {
+                    char name[MAX_STR];
+                    printf("Nombre del punto: "); scanf(" %[^\n]", name);
+                    graph_add_point(&route_graph, name);
+                } else if (sub == 2) {
+                    char from[MAX_STR], to[MAX_STR]; int w;
+                    printf("Origen: ");    scanf(" %[^\n]", from);
+                    printf("Destino: ");   scanf(" %[^\n]", to);
+                    printf("Distancia: "); scanf("%d", &w);
+                    graph_add_route(&route_graph, from, to, w);
+                } else if (sub == 3) {
+                    graph_show_points(&route_graph);
+                } else if (sub == 4) {
+                    graph_show_matrix(&route_graph);
+                }
+                break;
+            }
+
+            /* ── Reportes ─────────────────────────────────────── */
+            case 6: {
+                int sub = -1;
+                printf("\n1. Paquetes por estado\n2. Clientes (BST inorden)\n3. Ruta mas corta (Dijkstra)\nOpcion: ");
+                scanf("%d", &sub);
+                if (sub == 1) {
+                    printf("Pendientes:  %d\n", contarPaquetesPorEstado(lista_paquetes, "pendiente"));
+                    printf("Entregados:  %d\n", contarPaquetesPorEstado(lista_paquetes, "entregado"));
+                    printf("Devueltos:   %d\n", contarPaquetesPorEstado(lista_paquetes, "devuelto"));
+                } else if (sub == 2) {
+                    bst_inorder(client_tree);
+                } else if (sub == 3) {
+                    char origen[MAX_STR], destino[MAX_STR];
+                    graph_show_points(&route_graph);
+                    printf("Punto origen: ");  scanf(" %[^\n]", origen);
+                    printf("Punto destino: "); scanf(" %[^\n]", destino);
+                    graph_shortest_path(&route_graph, origen, destino);
+                }
+                break;
+            }
+
+            /* ── Salir ────────────────────────────────────────── */
+            case 0:
+                save_clients(client_tree);
+                printf("Hasta luego.\n");
+                break;
+
+            default:
+                printf("Opcion invalida.\n");
+        }
+    }
+
+    /* Liberar memoria */
+    bst_free(client_tree);
+    avl_free(package_tree);
+    return 0;
+}#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "client_bst.h"
+ //
+/* Crear nodo */
+/* entrada:  Client c — datos del cliente a almacenar
+   salida: puntero al nuevo nodo, o NULL si falla malloc */
+static BSTNode* create_node(Client c) {
+    BSTNode *node = (BSTNode*)malloc(sizeof(BSTNode));
+    if (!node) {
+        printf("Error: no se pudo asignar memoria para el nodo.\n");
+        return NULL;
+    }
+    node->data  = c;
+    node->left  = NULL;
+    node->right = NULL;
+    return node;
+}
+
+/* Insertar cliente */
+/* entrada:  root — raíz actual del árbol (puede ser NULL)
+           c    — cliente a insertar
+   salida: nueva raíz del árbol
+   restricciones :  rechaza IDs duplicados; usa recursión */
+BSTNode* bst_insert(BSTNode *root, Client c) {
+    if (root == NULL) {
+        return create_node(c);
+    }
+    if (c.id < root->data.id) {
+        root->left  = bst_insert(root->left, c);
+    } else if (c.id > root->data.id) {
+        root->right = bst_insert(root->right, c);
+    } else {
+        printf("Error: ya existe un cliente con ID %d.\n", c.id);
+    }
+    return root;
+}
+
+/*  Buscar por ID  */
+/* entrada:  root — raíz del árbol
+           id   — identificación a buscar
+  salida : puntero al nodo encontrado, o NULL si no existe */
+BSTNode* bst_search(BSTNode *root, int id) {
+    if (root == NULL) {
+        return NULL;
+    }
+    if (id == root->data.id) {
+        return root;
+    }
+    if (id < root->data.id) {
+        return bst_search(root->left, id);
+    }
+    return bst_search(root->right, id);
+}
+
+/*  Recorrido inorden (Izq → Nodo → Der)  */
+/* salida: clientes impresos en orden ascendente de ID */
+void bst_inorder(BSTNode *root) {
+    if (root == NULL) return;
+    bst_inorder(root->left);
+    printf("  ID: %d | %s | %s | %s | %s\n",
+           root->data.id,
+           root->data.name,
+           root->data.phone,
+           root->data.email,
+           root->data.address);
+    bst_inorder(root->right);
+}
+
+/* ─ Recorrido preorden (Nodo → Izq → Der)  */
+void bst_preorder(BSTNode *root) {
+    if (root == NULL) return;
+    printf("  ID: %d | %s\n", root->data.id, root->data.name);
+    bst_preorder(root->left);
+    bst_preorder(root->right);
+}
+
+/*  Recorrido postorden (Izq → Der → Nodo)  */
+void bst_postorder(BSTNode *root) {
+    if (root == NULL) return;
+    bst_postorder(root->left);
+    bst_postorder(root->right);
+    printf("  ID: %d | %s\n", root->data.id, root->data.name);
+}
+
+/* Liberar memoria  */
+/* Recorre en postorden para liberar hijos antes que el padre */
+void bst_free(BSTNode *root) {
+    if (root == NULL) return;
+    bst_free(root->left);
+    bst_free(root->right);
+    free(root);
+}
+#ifndef CLIENT_BST_H
+#define CLIENT_BST_H
+
+#define MAX_STR 100
+
+typedef struct Client {
+    int id;
+    char name[MAX_STR];
+    char phone[MAX_STR];
+    char email[MAX_STR];
+    char address[MAX_STR];
+} Client;
+
+typedef struct BSTNode {
+    Client data;
+    struct BSTNode *left;
+    struct BSTNode *right;
+} BSTNode;
+
+BSTNode* bst_insert(BSTNode *root, Client c);
+BSTNode* bst_search(BSTNode *root, int id);
+void     bst_inorder(BSTNode *root);
+void     bst_preorder(BSTNode *root);
+void     bst_postorder(BSTNode *root);
+void     bst_free(BSTNode *root);
+
+#endif
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "package_avl.h"
+
+/* FUNCIONES AUXILIARES DE ALTURA Y BALANCE */
+
+/* entrada:  nodo (puede ser NULL)
+   salida: altura almacenada, o 0 si el nodo es NULL */
+static int height(AVLNode *n) {
+    return n ? n->height : 0;
+}
+
+/* entrada:  dos enteros
+   salida: el mayor de los dos */
+static int max2(int a, int b) {
+    return a > b ? a : b;
+}
+
+/* Recalcula la altura de un nodo a partir de sus hijos */
+static void update_height(AVLNode *n) {
+    n->height = 1 + max2(height(n->left), height(n->right));
+}
+
+/* entrada:  nodo
+   salida: factor de balance = altura(izq) - altura(der)
+           >1 → cargado a la izquierda
+           <-1 → cargado a la derecha */
+static int balance_factor(AVLNode *n) {
+    return n ? height(n->left) - height(n->right) : 0;
+}
+
+/* ROTACIONES */
+
+/*  Rotación simple derecha (caso izquierda-izquierda)
+    Antes:       y            Después:    x
+                / \                      / \
+               x   C                   A   y
+              / \                         / \
+             A   B                       B   C
+*/
+static AVLNode* rotate_right(AVLNode *y) {
+    AVLNode *x = y->left;
+    AVLNode *B = x->right;
+
+    x->right = y;
+    y->left  = B;
+
+    update_height(y);
+    update_height(x);
+    return x;
+}
+
+/*  Rotación simple izquierda (caso derecha-derecha)
+    Antes:    x              Después:      y
+             / \                          / \
+            A   y                        x   C
+               / \                      / \
+              B   C                    A   B
+*/
+static AVLNode* rotate_left(AVLNode *x) {
+    AVLNode *y = x->right;
+    AVLNode *B = y->left;
+
+    y->left  = x;
+    x->right = B;
+
+    update_height(x);
+    update_height(y);
+    return y;
+}
+
+/* CREAR NODO  */
+
+/* entrada:  Package p — datos del paquete
+   salida: nuevo nodo con altura 1, hijos NULL */
+static AVLNode* create_node(Package p) {
+    AVLNode *node = (AVLNode*)malloc(sizeof(AVLNode));
+    if (!node) {
+        printf("Error: no se pudo asignar memoria.\n");
+        return NULL;
+    }
+    node->data   = p;
+    node->height = 1;
+    node->left   = NULL;
+    node->right  = NULL;
+    return node;
+}
+
+/* INSERCIÓN CON REBALANCEO */
+
+/* entrada:  root — raíz actual (puede ser NULL)
+           p    — paquete a insertar
+   salida: nueva raíz del subárbol (puede cambiar por rotación)
+   Lógica:
+     1. Insertar como BST normal
+     2. Actualizar altura
+     3. Calcular factor de balance
+     4. Aplicar rotación si |balance| > 1                          */
+AVLNode* avl_insert(AVLNode *root, Package p) {
+    /* Paso 1: inserción BST */
+    if (root == NULL) return create_node(p);
+
+    if (p.id < root->data.id) {
+        root->left  = avl_insert(root->left, p);
+    } else if (p.id > root->data.id) {
+        root->right = avl_insert(root->right, p);
+    } else {
+        printf("Error: ya existe un paquete con ID %d.\n", p.id);
+        return root;
+    }
+
+    /* Paso 2: actualizar altura */
+    update_height(root);
+
+    /* Paso 3: factor de balance */
+    int bf = balance_factor(root);
+
+    /* Paso 4: cuatro casos de desbalance */
+
+    /* Caso izquierda-izquierda: nuevo nodo en subárbol izq-izq
+       Solución: rotación simple derecha                           */
+    if (bf > 1 && p.id < root->left->data.id) {
+        return rotate_right(root);
+    }
+
+    /* Caso derecha-derecha: nuevo nodo en subárbol der-der
+       Solución: rotación simple izquierda                         */
+    if (bf < -1 && p.id > root->right->data.id) {
+        return rotate_left(root);
+    }
+
+    /* Caso izquierda-derecha: nuevo nodo en subárbol izq-der
+       Solución: rotar hijo izq a la izquierda, luego raíz derecha */
+    if (bf > 1 && p.id > root->left->data.id) {
+        root->left = rotate_left(root->left);
+        return rotate_right(root);
+    }
+
+    /* Caso derecha-izquierda: nuevo nodo en subárbol der-izq
+       Solución: rotar hijo der a la derecha, luego raíz izquierda */
+    if (bf < -1 && p.id < root->right->data.id) {
+        root->right = rotate_right(root->right);
+        return rotate_left(root);
+    }
+
+    return root;
+}
+
+/*  BÚSQUEDA */
+
+/* entrada:  root — raíz del AVL
+           id   — ID del paquete a buscar
+   salida: puntero al nodo, o NULL si no existe */
+AVLNode* avl_search(AVLNode *root, int id) {
+    if (root == NULL)        return NULL;
+    if (id == root->data.id) return root;
+    if (id < root->data.id)  return avl_search(root->left, id);
+    return avl_search(root->right, id);
+}
+
+/* RECORRIDO INORDEN  */
+
+/* Imprime paquetes en orden ascendente de ID */
+void avl_inorder(AVLNode *root) {
+    if (root == NULL) return;
+    avl_inorder(root->left);
+    printf("  ID: %d | %s | Estado: %s | Cliente: %d | Destino: %s\n",
+           root->data.id,
+           root->data.description,
+           root->data.status,
+           root->data.client_id,
+           root->data.destination);
+    avl_inorder(root->right);
+}
+
+/* LIBERAR MEMORIA */
+
+void avl_free(AVLNode *root) {
+    if (root == NULL) return;
+    avl_free(root->left);
+    avl_free(root->right);
+    free(root);
+}
+#ifndef PACKAGE_AVL_H
+#define PACKAGE_AVL_H
+
+#define MAX_STR 100
+
+typedef struct Package {
+    int    id;
+    char   description[MAX_STR];
+    char   status[MAX_STR];
+    int    client_id;
+    char   destination[MAX_STR];
+} Package;
+
+typedef struct AVLNode {
+    Package data;
+    int     height;
+    struct AVLNode *left;
+    struct AVLNode *right;
+} AVLNode;
+
+AVLNode* avl_insert(AVLNode *root, Package p);
+AVLNode* avl_search(AVLNode *root, int id);
+void     avl_inorder(AVLNode *root);
+void     avl_free(AVLNode *root);
+
+#endif
+#include <stdio.h>
+#include <string.h>
+#include "routes_graph.h"
+
+/* FUNCIÓN AUXILIAR — buscar índice de un punto por nombre
+   Entrada:  g    — puntero al grafo
+           name — nombre del punto a buscar
+   Salida: índice en el arreglo, o -1 si no existe */
+static int find_index(const Graph *g, const char *name) {
+    for (int i = 0; i < g->count; i++) {
+        if (strcmp(g->points[i], name) == 0) return i;
+    }
+    return -1;
+}
+
+/* INICIALIZAR GRAFO
+   entrada:  g — puntero al grafo a inicializar
+   salida:  pone todos los pesos en 0 y el contador en 0 */
+void graph_init(Graph *g) {
+    g->count = 0;
+    for (int i = 0; i < MAX_POINTS; i++) {
+        g->points[i][0] = '\0';
+        for (int j = 0; j < MAX_POINTS; j++) {
+            g->matrix[i][j] = 0;
+        }
+    }
+}
+
+/* REGISTRAR PUNTO DE ENTREGA
+   Entrada:  g    — puntero al grafo
+           name — nombre del nuevo punto (ej: "San Jose Centro")
+   Salida: índice asignado, o -1 si falla
+   Valida: no duplicados, no superar MAX_POINTS*/
+int graph_add_point(Graph *g, const char *name) {
+    if (g->count >= MAX_POINTS) {
+        printf("Error: se alcanzo el maximo de puntos (%d).\n", MAX_POINTS);
+        return -1;
+    }
+    if (find_index(g, name) != -1) {
+        printf("Error: el punto '%s' ya existe.\n", name);
+        return -1;
+    }
+    strncpy(g->points[g->count], name, MAX_STR - 1);
+    g->points[g->count][MAX_STR - 1] = '\0';
+    return g->count++;
+}
+
+/* REGISTRAR RUTA ENTRE DOS PUNTOS
+   entrada:  g      — puntero al grafo
+           from   — nombre del punto origen
+           to     — nombre del punto destino
+           weight — distancia o tiempo de la ruta (debe ser > 0)
+   salida: 0 si éxito, -1 si falla
+   Valida: ambos puntos deben existir, peso positivo */
+int graph_add_route(Graph *g, const char *from, const char *to, int weight) {
+    int i = find_index(g, from);
+    int j = find_index(g, to);
+
+    if (i == -1) {
+        printf("Error: el punto origen '%s' no existe.\n", from);
+        return -1;
+    }
+    if (j == -1) {
+        printf("Error: el punto destino '%s' no existe.\n", to);
+        return -1;
+    }
+    if (weight <= 0) {
+        printf("Error: el peso de la ruta debe ser mayor que 0.\n");
+        return -1;
+    }
+
+    g->matrix[i][j] = weight;
+    return 0;
+}
+
+/* MOSTRAR PUNTOS DE ENTREGA */
+void graph_show_points(const Graph *g) {
+    if (g->count == 0) {
+        printf("No hay puntos de entrega registrados.\n");
+        return;
+    }
+    printf("Puntos de entrega registrados (%d):\n", g->count);
+    for (int i = 0; i < g->count; i++) {
+        printf("  [%d] %s\n", i, g->points[i]);
+    }
+}
+
+/* MOSTRAR MATRIZ DE ADYACENCIA
+   Imprime la tabla origen × destino con los pesos.
+   0 = no hay ruta directa entre esos dos puntos. */
+void graph_show_matrix(const Graph *g) {
+    if (g->count == 0) {
+        printf("El grafo no tiene puntos aun.\n");
+        return;
+    }
+
+    /* Encabezado de columnas */
+    printf("\n%20s", " ");
+    for (int j = 0; j < g->count; j++) {
+        printf("%12s", g->points[j]);
+    }
+    printf("\n");
+
+    /* Separador */
+    printf("%20s", " ");
+    for (int j = 0; j < g->count; j++) printf("------------");
+    printf("\n");
+
+    /* Filas */
+    for (int i = 0; i < g->count; i++) {
+        printf("%20s |", g->points[i]);
+        for (int j = 0; j < g->count; j++) {
+            if (g->matrix[i][j] == 0)
+                printf("%12s", "-");
+            else
+                printf("%12d", g->matrix[i][j]);
+        }
+        printf("\n");
+    }
+    printf("\n");
+}
+
+#include <limits.h>
+
+#define INF INT_MAX
+
+/* FUNCIÓN AUXILIAR INTERNA — Encuentra el vértice con la distancia mínima 
+   que aún no ha sido procesado (visitado). */
+static int dijkstra_min_distance(const int dist[], const int visited[], int count) {
+    int min = INF, min_index = -1;
+
+    for (int v = 0; v < count; v++) {
+        if (visited[v] == 0 && dist[v] <= min) {
+            min = dist[v];
+            min_index = v;
+        }
+    }
+    return min_index;
+}
+
+/* FUNCIÓN AUXILIAR INTERNA*/
+static void dijkstra_print_path(const int parent[], int j, const Graph *g) {
+    if (parent[j] == -1) {
+        printf("%s", g->points[j]);
+        return;
+    }
+
+    dijkstra_print_path(parent, parent[j], g);
+    printf(" -> %s", g->points[j]);
+}
+
+/* CALCULAR RUTA MÁS CORTA (DIJKSTRA)*/
+void graph_shortest_path(const Graph *g, const char *from, const char *to) {
+    int count = g->count;
+    int src = -1, dest = -1;
+
+    for (int i = 0; i < count; i++) {
+        if (strcmp(g->points[i], from) == 0) src = i;
+        if (strcmp(g->points[i], to) == 0) dest = i;
+    }
+
+    if (src == -1) {
+        printf("Error: El punto de origen '%s' no existe.\n", from);
+        return;
+    }
+    if (dest == -1) {
+        printf("Error: El punto de destino '%s' no existe.\n", to);
+        return;
+    }
+
+    int dist[MAX_POINTS];     
+    int visited[MAX_POINTS]; 
+    int parent[MAX_POINTS];   
+
+    for (int i = 0; i < count; i++) {
+        dist[i] = INF;
+        visited[i] = 0;
+        parent[i] = -1;
+    }
+
+    dist[src] = 0;
+
+    for (int i = 0; i < count - 1; i++) {
+        int u = dijkstra_min_distance(dist, visited, count);
+
+        if (u == -1 || dist[u] == INF) break;
+
+        visited[u] = 1;
+
+        for (int v = 0; v < count; v++) {
+
+            if (!visited[v] && g->matrix[u][v] > 0 && dist[u] != INF 
+                && dist[u] + g->matrix[u][v] < dist[v]) {
+                
+                parent[v] = u;
+                dist[v] = dist[u] + g->matrix[u][v];
+            }
+        }
+    }
+
+    if (dist[dest] == INF) {
+        printf("No existe una ruta disponible entre '%s' y '%s'.\n", from, to);
+    } else {
+        printf("\nRuta mas corta: ");
+        dijkstra_print_path(parent, dest, g);
+        printf("\n");
+        printf("Distancia total: %d km\n\n", dist[dest]);
+    }
+}#ifndef ROUTES_GRAPH_H
+#define ROUTES_GRAPH_H
+
+#define MAX_POINTS 20   
+#define MAX_STR 100
+
+typedef struct {
+    char points[MAX_POINTS][MAX_STR];   
+    int matrix[MAX_POINTS][MAX_POINTS];  
+    int count;                           
+} Graph;
+
+void graph_init(Graph *g);
+
+int graph_add_point(Graph *g, const char *name);
+
+int graph_add_route(Graph *g, const char *from, const char *to, int weight);
+
+void graph_show_points(const Graph *g);
+
+void graph_show_matrix(const Graph *g);
+
+void graph_shortest_path(const Graph *g, const char *from, const char *to);
+
+#endif #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "client_bst.h"
+#include "files.h"
+
+#define CLIENTS_FILE "clients.txt"
+//Probando
+/*  Formato del archivo clients.txt
+   Una línea por cliente, campos separados por '|':
+   id|nombre|telefono|correo|direccion
+   Ejemplo:
+   1001|Ana Rojas|8888-1111|ana@mail.com|San Jose Centro
+   */
+
+/* Cargar clientes desde archivo */
+/* entrada:  root — raíz actual del BST (puede ser NULL al inicio)
+   salida: raíz del BST con todos los clientes del archivo cargados
+   restricciones:  si el archivo no existe, retorna root sin cambios */
+BSTNode* load_clients(BSTNode *root) {
+    FILE *fp = fopen(CLIENTS_FILE, "r");
+    if (fp == NULL) {
+        printf("Nota: no se encontro %s. Se inicia sin clientes.\n", CLIENTS_FILE);
+        return root;
+    }
+
+    Client c;
+    char line[512];
+    int loaded = 0;
+
+    while (fgets(line, sizeof(line), fp)) {
+        /* Eliminar salto de línea al final */
+        line[strcspn(line, "\n")] = '\0';
+        if (strlen(line) == 0) continue;
+
+        /* Parsear campos separados por '|' */
+        char *token = strtok(line, "|");
+        if (!token) continue;
+        c.id = atoi(token);
+
+        token = strtok(NULL, "|"); if (!token) continue;
+        strncpy(c.name, token, MAX_STR - 1);
+
+        token = strtok(NULL, "|"); if (!token) continue;
+        strncpy(c.phone, token, MAX_STR - 1);
+
+        token = strtok(NULL, "|"); if (!token) continue;
+        strncpy(c.email, token, MAX_STR - 1);
+
+        token = strtok(NULL, "|"); if (!token) continue;
+        strncpy(c.address, token, MAX_STR - 1);
+
+        root = bst_insert(root, c);
+        loaded++;
+    }
+
+    fclose(fp);
+    printf("Clientes cargados desde archivo: %d\n", loaded);
+    return root;
+}
+
+/*  Guardar clientes en archivo (usar en Día 3)  */
+/* Input:  root  raíz del BST con todos los clientes
+   Notas:  recorre inorden para guardar ordenados por ID */
+static void save_node(FILE *fp, BSTNode *root) {
+    if (root == NULL) return;
+    save_node(fp, root->left);
+    fprintf(fp, "%d|%s|%s|%s|%s\n",
+            root->data.id,
+            root->data.name,
+            root->data.phone,
+            root->data.email,
+            root->data.address);
+    save_node(fp, root->right);
+}
+
+void save_clients(BSTNode *root) {
+    FILE *fp = fopen(CLIENTS_FILE, "w");
+    if (fp == NULL) {
+        printf("Error: no se pudo abrir %s para escritura.\n", CLIENTS_FILE);
+        return;
+    }
+    save_node(fp, root);
+    fclose(fp);
+    printf("Clientes guardados en %s.\n", CLIENTS_FILE);
+}
+#ifndef FILES_H
+#define FILES_H
+
+#include "client_bst.h"
+
+BSTNode* load_clients(BSTNode *root);
+void     save_clients(BSTNode *root);
+
+#endif
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "package_list.h"
+
+// Función auxiliar para buscar si un código de paquete ya existe
+NodoPaquete* buscarPaquete(NodoPaquete* cabeza, const char* codigoBuscar) {
+    NodoPaquete* actual = cabeza;
+    
+    while (actual != NULL) {
+        if (strcmp(actual->datos.codigo, codigoBuscar) == 0) {
+            return actual; 
+        }
+        actual = actual->siguiente;
+    }
+    return NULL; 
+}
+
+// Registrar paquetes sin permitir códigos duplicados (Insertar al inicio de la lista)
+NodoPaquete* registrarPaquete(NodoPaquete* cabeza, Paquete nuevoPaquete) {
+    if (buscarPaquete(cabeza, nuevoPaquete.codigo) != NULL) {
+        printf("Error: El paquete con codigo %s ya esta registrado.\n", nuevoPaquete.codigo);
+        return cabeza; 
+    }
+
+
+    NodoPaquete* nuevoNodo = (NodoPaquete*)malloc(sizeof(NodoPaquete));
+    if (nuevoNodo == NULL) {
+        printf("Error: No se pudo asignar memoria para el paquete.\n");
+        return cabeza;
+    }
+
+    nuevoNodo->datos = nuevoPaquete;
+    nuevoNodo->siguiente = cabeza;
+
+    printf("Paquete %s registrado con exito.\n", nuevoPaquete.codigo);
+    
+    return nuevoNodo;
+}
+
+// Mostrar la lista completa de paquetes
+void mostrarPaquetes(NodoPaquete* cabeza) {
+    if (cabeza == NULL) {
+        printf("La lista de paquetes esta vacia.\n");
+        return;
+    }
+
+    NodoPaquete* actual = cabeza;
+    printf("\n=== LISTA DE PAQUETES REGISTRADOS ===\n");
+    while (actual != NULL) {
+        printf("Codigo: %s | Cliente: %d | Destinatario: %s | Destino: %s | Peso: %.2fkg | Prioridad: %d | Estado: %s\n",
+               actual->datos.codigo, actual->datos.idCliente, actual->datos.destinatario, 
+               actual->datos.destino, actual->datos.peso, actual->datos.prioridad, actual->datos.estado);
+        actual = actual->siguiente;
+    }
+    printf("======================================\n");
+}
+
+// Modificar el estado de un paquete
+void modificarEstadoPaquete(NodoPaquete* cabeza, const char* codigoBuscar, const char* nuevoEstado) {
+    NodoPaquete* encontrado = buscarPaquete(cabeza, codigoBuscar);
+    
+    if (encontrado != NULL) {
+        strcpy(encontrado->datos.estado, nuevoEstado);
+        printf("Estado del paquete %s actualizado a: %s\n", codigoBuscar, nuevoEstado);
+    } else {
+        printf("Error: No se encontro el paquete con codigo %s.\n", codigoBuscar);
+    }
+}
+
+//Eliminar paquetes de la lista
+NodoPaquete* eliminarPaquete(NodoPaquete* cabeza, const char* codigoEliminar) {
+    NodoPaquete* actual = cabeza;
+    NodoPaquete* anterior = NULL;
+
+    while (actual != NULL && strcmp(actual->datos.codigo, codigoEliminar) != 0) {
+        anterior = actual;
+        actual = actual->siguiente;
+    }
+
+    if (actual == NULL) {
+        printf("Error: El paquete con codigo %s no existe.\n", codigoEliminar);
+        return cabeza;
+    }
+
+    if (anterior == NULL) {
+        cabeza = actual->siguiente;
+    } else {
+        anterior->siguiente = actual->siguiente;
+    }
+
+    free(actual);
+    printf("Paquete %s eliminado correctamente del sistema.\n", codigoEliminar);
+
+    return cabeza;
+}
+
+// Contar paquetes por estado para reportes
+int contarPaquetesPorEstado(NodoPaquete* cabeza, const char* estadoBuscar) {
+    int contador = 0;
+    NodoPaquete* actual = cabeza;
+
+    while (actual != NULL) {
+        if (strcmp(actual->datos.estado, estadoBuscar) == 0) {
+            contador++;
+        }
+        actual = actual->siguiente;
+    }
+
+    return contador;
+}#ifndef PACKAGE_LIST_H
+#define PACKAGE_LIST_H
+
+typedef struct {
+    char codigo[20];          
+    int idCliente;            
+    char destinatario[100];
+    char destino[200];
+    float peso;
+    int prioridad;            
+    char estado[30];          
+} Paquete;
+
+
+typedef struct NodoPaquete {
+    Paquete datos;
+    struct NodoPaquete* siguiente;
+} NodoPaquete;
+
+NodoPaquete* buscarPaquete(NodoPaquete* cabeza, const char* codigoBuscar);
+
+NodoPaquete* registrarPaquete(NodoPaquete* cabeza, Paquete nuevoPaquete);
+
+
+void mostrarPaquetes(NodoPaquete* cabeza);
+
+
+void modificarEstadoPaquete(NodoPaquete* cabeza, const char* codigoBuscar, const char* nuevoEstado);
+
+NodoPaquete* eliminarPaquete(NodoPaquete* cabeza, const char* codigoEliminar);
+
+
+int contarPaquetesPorEstado(NodoPaquete* cabeza, const char* estadoBuscar);
+
+#endif#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "delivery_queue.h"
+
+// Inicializa la cola apuntando sus extremos a NULL
+void inicializarCola(Cola* c) {
+    c->frente = NULL;
+    c->final = NULL;
+}
+
+// Encolar un paquete registrado (Comportamiento FIFO)
+void encolarPaquete(Cola* c, Paquete nuevoPaquete) {
+    NodoCola* nuevoNodo = (NodoCola*)malloc(sizeof(NodoCola));
+    if (nuevoNodo == NULL) {
+        printf("Error: No hay memoria para encolar el paquete.\n");
+        return;
+    }
+
+    // Restricción: Forzar el estado a "Pendiente de entrega"
+    strcpy(nuevoPaquete.estado, "Pendiente de entrega");
+    nuevoNodo->datos = nuevoPaquete;
+    nuevoNodo->siguiente = NULL;
+
+    if (c->final == NULL) {
+        c->frente = nuevoNodo;
+        c->final = nuevoNodo;
+    } else {
+        c->final->siguiente = nuevoNodo;
+        c->final = nuevoNodo;
+    }
+    printf("Paquete %s encolado con exito.\n", nuevoPaquete.codigo);
+}
+
+// Mostrar todos los paquetes en la cola
+void mostrarCola(Cola c) {
+    if (c.frente == NULL) {
+        printf("La cola de entregas pendientes esta vacia.\n");
+        return;
+    }
+
+    NodoCola* actual = c.frente;
+    printf("\n--- COLA DE ENTREGAS PENDIENTES ---\n");
+    while (actual != NULL) {
+        printf("Codigo: %s | Destinatario: %s | Estado: %s\n",
+               actual->datos.codigo, actual->datos.destinatario, actual->datos.estado);
+        actual = actual->siguiente;
+    }
+}
+
+// Consultar el siguiente paquete en la cola sin sacarlo
+void consultarSiguienteCola(Cola c) {
+    if (c.frente == NULL) {
+        printf("No hay paquetes pendientes en la cola.\n");
+        return;
+    }
+    printf("Siguiente en cola: %s (Destinatario: %s)\n", 
+           c.frente->datos.codigo, c.frente->datos.destinatario);
+}
+
+// Desencolar un paquete para su procesamiento
+// Retorna la estructura con los datos del paquete extraído
+Paquete desencolarPaquete(Cola* c) {
+    Paquete pkgVacio = {"", 0, "", "", 0.0, 0, ""}; // Por si está vacía
+    
+    if (c->frente == NULL) {
+        printf("Error: La cola esta vacia, no se puede desencolar.\n");
+        return pkgVacio;
+    }
+
+    NodoCola* temporal = c->frente;
+    Paquete datosPaquete = temporal->datos;
+
+    c->frente = c->frente->siguiente;
+    if (c->frente == NULL) {
+        c->final = NULL;
+    }
+
+    free(temporal);
+    return datosPaquete;
+} #ifndef DELIVERY_QUEUE_H
+#define DELIVERY_QUEUE_H
+
+#include "package_list.h" 
+
+typedef struct NodoCola {
+    Paquete datos;
+    struct NodoCola* siguiente;
+} NodoCola;
+
+typedef struct {
+    NodoCola* frente;
+    NodoCola* final;
+} Cola;
+
+void inicializarCola(Cola* c);
+
+void encolarPaquete(Cola* c, Paquete nuevoPaquete);
+
+void mostrarCola(Cola c);
+
+void consultarSiguienteCola(Cola c);
+
+Paquete desencolarPaquete(Cola* c);
+
+#endif#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "returns_stack.h"
+
+// --- FUNCIONALIDADES DE LA PILA ---
+// Inicializa la pila con el tope apuntando a NULL
+void inicializarPila(Pila* p) {
+    p->tope = NULL;
+}
+
+//Apilar un paquete devuelto (Comportamiento LIFO)
+void apilarPaquete(Pila* p, Paquete paqueteDevuelto) {
+    NodoPila* nuevoNodo = (NodoPila*)malloc(sizeof(NodoPila));
+    if (nuevoNodo == NULL) {
+        printf("Error: No hay memoria para apilar el paquete devuelto.\n");
+        return;
+    }
+
+    // Forzar el estado a "Devuelto" al ingresar a la pila
+    strcpy(paqueteDevuelto.estado, "Devuelto");
+    nuevoNodo->datos = paqueteDevuelto;
+    
+    // El nuevo nodo apunta al antiguo tope y se convierte en el nuevo tope
+    nuevoNodo->siguiente = p->tope;
+    p->tope = nuevoNodo;
+    
+    printf("Paquete %s almacenado en la Pila de Devoluciones.\n", paqueteDevuelto.codigo);
+}
+
+//Mostrar los paquetes devueltos en la pila
+void mostrarPila(Pila p) {
+    if (p.tope == NULL) {
+        printf("La pila de devoluciones esta vacia.\n");
+        return;
+    }
+
+    NodoPila* actual = p.tope;
+    printf("\n--- PILA DE PAQUETES DEVUELTOS (Ultimo en entrar, primero en salir) ---\n");
+    while (actual != NULL) {
+        printf("Codigo: %s | Destinatario: %s | Motivo: %s\n",
+               actual->datos.codigo, actual->datos.destinatario, actual->datos.estado);
+        actual = actual->siguiente;
+    }
+}
+
+//Consultar el ultimo paquete devuelto (Ver el tope sin sacarlo)
+void consultarUltimoDevuelto(Pila p) {
+    if (p.tope == NULL) {
+        printf("No hay paquetes devueltos en la pila para consultar.\n");
+        return;
+    }
+    printf("Ultimo devuelto en el tope: %s (Destinatario: %s)\n", 
+           p.tope->datos.codigo, p.tope->datos.destinatario);
+}
+
+// Desapilar un paquete para reprocesarlo e interconectarlo
+// Retorna el paquete para que en el main puedas enviarlo directo a la cola
+Paquete desapilarPaquete(Pila* p) {
+    Paquete pkgVacio = {"", 0, "", "", 0.0, 0, ""};
+    
+    if (p->tope == NULL) {
+        printf("Error: No hay paquetes en la pila para desapilar.\n");
+        return pkgVacio;
+    }
+
+    NodoPila* temporal = p->tope;
+    Paquete paqueteAMover = temporal->datos;
+
+    // El tope ahora pasa a ser el siguiente de la lista
+    p->tope = p->tope->siguiente;
+    free(temporal);
+
+    printf("Paquete %s extraido de la pila de devoluciones.\n", paqueteAMover.codigo);
+    return paqueteAMover;
+}#ifndef RETURNS_STACK_H
+#define RETURNS_STACK_H
+
+#include "package_list.h" 
+
+
+
+typedef struct NodoPila {
+    Paquete datos;
+    struct NodoPila* siguiente;
+} NodoPila;
+
+typedef struct {
+    NodoPila* tope;
+} Pila;
+
+void inicializarPila(Pila* p);
+
+void apilarPaquete(Pila* p, Paquete paqueteDevuelto);
+
+void mostrarPila(Pila p);
+
+void consultarUltimoDevuelto(Pila p);
+
+Paquete desapilarPaquete(Pila* p);
+
+#endif 

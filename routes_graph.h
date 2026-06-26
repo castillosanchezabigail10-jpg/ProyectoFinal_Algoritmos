@@ -2,7 +2,7 @@
 #define ROUTES_GRAPH_H
 
 #define MAX_POINTS 20   
-#define MAX_STR 50      
+#define MAX_STR 100
 
 typedef struct {
     char points[MAX_POINTS][MAX_STR];   

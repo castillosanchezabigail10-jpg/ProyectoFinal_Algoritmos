@@ -59,6 +59,7 @@ void register_package() {
 }
 
 /*  MENÚ PRINCIPAL */
+int main() {
     /* Inicializar estructuras */
     graph_init(&route_graph);
     inicializarCola(&cola_entregas);

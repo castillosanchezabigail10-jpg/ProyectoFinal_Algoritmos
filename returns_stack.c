@@ -3,25 +3,6 @@
 #include <string.h>
 #include "returns_stack.h"
 
-typedef struct {
-    char codigo[20];
-    int idCliente;
-    char destinatario[100];
-    char destino[200];
-    float peso;
-    int prioridad;
-    char estado[30]; 
-} Paquete;
-
-typedef struct NodoPila {
-    Paquete datos;
-    struct NodoPila* siguiente;
-} NodoPila;
-
-typedef struct {
-    NodoPila* tope;
-} Pila;
-
 // --- FUNCIONALIDADES DE LA PILA ---
 // Inicializa la pila con el tope apuntando a NULL
 void inicializarPila(Pila* p) {

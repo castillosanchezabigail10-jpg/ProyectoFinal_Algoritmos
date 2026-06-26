@@ -3,28 +3,6 @@
 #include <string.h>
 #include "delivery_queue.h"
 
-// --- ESTRUCTURAS COMPARTIDAS ---
-typedef struct {
-    char codigo[20];
-    int idCliente;
-    char destinatario[100];
-    char destino[200];
-    float peso;
-    int prioridad;
-    char estado[30]; 
-} Paquete;
-
-typedef struct NodoCola {
-    Paquete datos;
-    struct NodoCola* siguiente;
-} NodoCola;
-
-typedef struct {
-    NodoCola* frente;
-    NodoCola* final;
-} Cola;
-
-
 // Inicializa la cola apuntando sus extremos a NULL
 void inicializarCola(Cola* c) {
     c->frente = NULL;

@@ -3,23 +3,6 @@
 #include <string.h>
 #include "package_list.h"
 
-// Definición de la estructura para los datos del Paquete
-typedef struct {
-    char codigo[20];          
-    int idCliente;            
-    char destinatario[100];
-    char destino[200];
-    float peso;
-    int prioridad;            
-    char estado[30];          
-} Paquete;
-
-// Definición del Nodo de la Lista Enlazada Simple
-typedef struct NodoPaquete {
-    Paquete datos;
-    struct NodoPaquete* siguiente;
-} NodoPaquete;
-
 // Función auxiliar para buscar si un código de paquete ya existe
 NodoPaquete* buscarPaquete(NodoPaquete* cabeza, const char* codigoBuscar) {
     NodoPaquete* actual = cabeza;
